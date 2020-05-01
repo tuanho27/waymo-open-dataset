@@ -1,21 +1,22 @@
 # Modify this file to fill in your information and then
 # run create_submission to generate a submission file.
 
-task: DETECTION_3D
-account_name: "your_registered_email@gmail.com"
+task: TRACKING_2D
+account_name: "holaituan@gmail.com"
 # Change this to your unique method name. Max 25 chars.
-unique_method_name: "Your unique method name."
+unique_method_name: "FCTrack"
 
-authors: "Author1"
-authors: "Author2"
+authors: "Tuan Ho"
+authors: "Ngoc Nguyen"
+authors: "Chuong Nguyen"
 
-affiliation: "Your affiliation."
-description: "A detailed description of your method."
+affiliation: "CyberCore Co.,Ltd."
+description: "Using Free-Anchor detector and tracking jointly"
 
-method_link: "A link to your method, e.g. paper, code etc."
+method_link: "https://arxiv.org/abs/2004.01177"
 
 # See submission.proto for allowed types.
-sensor_type: LIDAR_ALL
+sensor_type: CAMERA_ALL
 
 number_past_frames_exclude_current: 0
 number_future_frames_exclude_current: 0
