@@ -26,8 +26,9 @@ from tqdm import tqdm
 from time import time
 
 ## Origin WH 1920x1280, 1920x886
-Center_RATIO = {'FRONT':0.5625, 'FRONT_LEFT':0.5625, 'SIDE_LEFT':(0.5625,0.8126410), 'FRONT_RIGHT':0.5625, 'SIDE_RIGHT':(0.5625,0.8126410)}  #HW/hw (1080x720)
+Center_RATIO = {'FRONT':0.5625, 'FRONT_LEFT':0.5625, 'SIDE_LEFT':(0.5625,0.5625), 'FRONT_RIGHT':0.5625, 'SIDE_RIGHT':(0.5625,0.5625)}  #HW/hw (1080x720)
 Fair_RATIO = {'FRONT':0.5625, 'FRONT_LEFT':0.5625, 'SIDE_LEFT':(0.5625,0.5625), 'FRONT_RIGHT':0.5625, 'SIDE_RIGHT':(0.5625,0.5625)}  #HW/hw (1080x720, 1080x498)
+RATIO = 0.5625
 
 CAT_TYPES = [
 	label_pb2.Label.TYPE_VEHICLE,
@@ -43,7 +44,7 @@ CAM_TYPES = {
 }
 
 
-def _create_pd_obj(frame, res, RATIO):
+def _create_pd_obj(frame, res, RATIO, mode):
 	"""Creates a prediction objects file."""
 	objs = []
 	# This is only needed for 2D detection or tracking tasks.
@@ -58,8 +59,11 @@ def _create_pd_obj(frame, res, RATIO):
 			obj.frame_timestamp_micros =  frame['timestamp_micros']
 			obj.camera_name = CAM_TYPES[frame['camera_type']]
 			# Populating box and score.
-
 			cx,cy,w,h = [float(x) for x in re[3:7]]
+			if mode == 'track':
+				track_id = "{}_{}".format(frame['camera_type'],re[1])
+			else:
+				track_id = str(0)
 			if isinstance(RATIO,tuple):
 				cx,cy,w,h = cx/RATIO[0], cy/RATIO[1], w/RATIO[0], h/RATIO[1]
 			else:
@@ -80,7 +84,7 @@ def _create_pd_obj(frame, res, RATIO):
 			obj.score = float(re[-2])
 			# For tracking, this must be set and it must be unique for each tracked
 			# sequence.
-			obj.object.id = re[1] #'unique object tracking ID'
+			obj.object.id = track_id #'unique object tracking ID'
 			# Use correct type.
 			obj.object.type = CAT_TYPES[int(float(re[2]))]
 			objs.append(obj)
@@ -108,7 +112,7 @@ def _create_pd_obj(frame, res, RATIO):
 		# sequence.
 		obj.object.id = str(0) #'unique object tracking ID'
 		# Use correct type.
-		obj.object.type = CAT_TYPES[0]
+		obj.object.type = int(0)
 		# Add more objects. Note that a reasonable detector should limit its maximum
 		# number of boxes predicted per frame. A reasonable value is around 400. A
 		# huge number of boxes can slow down metrics computation.
@@ -125,36 +129,70 @@ def main():
 	parser.add_argument('--track_result_path')
 	parser.add_argument('--ann_info')
 	parser.add_argument('--output')
+	parser.add_argument('--mode', default='track', help='track | detect')
 	args = parser.parse_args()
 	print("Start convert result prediction to binary format!")
-
-	results = {'FRONT':{}, 'FRONT_LEFT':{}, 'SIDE_LEFT':{}, 'FRONT_RIGHT':{}, 'SIDE_RIGHT':{}}
-	result_files = glob.glob("{}/*.txt".format(args.track_result_path))
-#	 assert len(result_files) == 5 # just 5 camera directions corresponding with 5 results
-	objects = metrics_pb2.Objects()
-
-	for i,res in enumerate(result_files):
-		camera_type = res.split("/")[-1].split("_")[-1].replace(".txt","")
-		with open(res,'r') as r:
-			results[camera_type] = r.readlines()
-			print("Load result files: {}".format(res))
-
 	with open(args.ann_info) as f: 
 		infos = json.load(f)
+	## for tracking output
+	if args.mode == 'track':
+		results = {'FRONT':{}, 'FRONT_LEFT':{}, 'SIDE_LEFT':{}, 'FRONT_RIGHT':{}, 'SIDE_RIGHT':{}}
+		counts = {'FRONT':0, 'FRONT_LEFT':0, 'SIDE_LEFT':0, 'FRONT_RIGHT':0, 'SIDE_RIGHT':0}
 
-	for i, frame in enumerate(tqdm(infos['images'])):
-		camera_type = frame['camera_type']
-		timestamp = frame['timestamp_micros']
-		res = [line for line in results[camera_type] if line.split(",")[-1].replace("\n","") == str(timestamp)]
-		if "center" in args.output:
-			objs = _create_pd_obj(frame, res, Center_RATIO[camera_type])
-		elif "fair" in args.output:
-			objs = _create_pd_obj(frame, res, Fair_RATIO[camera_type])
-		else:
-			raise ValueError('Add method type to output file')
-		for o in objs:
-			objects.objects.append(o)
+		result_files = glob.glob("{}/*.txt".format(args.track_result_path))
+		assert len(result_files) == 5 # just 5 camera directions corresponding with 5 results
+		objects = metrics_pb2.Objects()
+		for i,res in enumerate(result_files):
+			camera_type = res.split("/")[-1].split("-")[-1].replace(".txt","")
+			print(camera_type)
+			with open(res,'r') as r:
+				results[camera_type] = r.readlines()
+				print("Load result files: {}".format(res))
 
+		for i, frame in enumerate(tqdm(infos['images'])):
+			camera_type = frame['camera_type']
+			timestamp = frame['timestamp_micros']
+			# res = [line for line in results[camera_type] if line.split(",")[-1].replace("\n","") == str(timestamp)]
+			res = []
+			start = counts[camera_type]
+			for line in results[camera_type][start:-1]:
+				if line.split(",")[-1].replace("\n","") == str(timestamp):
+					res.append(line)
+					counts[camera_type]+=1
+				else:
+					break
+					
+			if "center" in args.output:
+				objs = _create_pd_obj(frame, res, Center_RATIO[camera_type], args.mode)
+			elif "fair" in args.output:
+				objs = _create_pd_obj(frame, res, Fair_RATIO[camera_type], args.mode)
+			else:
+				raise ValueError('Add method type to output file')
+			for o in objs:
+				objects.objects.append(o)
+
+	## for detection output
+	else:
+		objects = metrics_pb2.Objects()
+		result_files = "{}/val_detect.txt".format(args.track_result_path)
+		with open(result_files) as r:
+			results = r.readlines()
+			print("Load result files: {}".format(result_files))
+		count = 0
+		for i, frame in enumerate(tqdm(infos['images'])):
+			timestamp = frame['timestamp_micros']
+			res = []
+			for line in results[count:-1]:
+				if (int(line.split(",")[0]) - 1) == frame['frame_id']:
+					res.append(line)
+					count+=1
+				else:
+					break
+			objs = _create_pd_obj(frame, res, RATIO, args.mode)
+			for o in objs:
+				objects.objects.append(o)
+
+	## Gen the *.bin file
 	with open(args.output, 'wb') as f:
 		f.write(objects.SerializeToString())
 	f.close()
